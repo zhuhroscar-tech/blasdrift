@@ -54,8 +54,18 @@ other.
 
 ## Install
 
+Not yet published to PyPI. Install the latest GitHub Release wheel directly
+(checksum-verified, CI-built):
+
 ```bash
-pip install blasdrift
+pip install https://github.com/zhuhroscar-tech/blasdrift/releases/latest/download/blasdrift-0.1.0-py3-none-any.whl
+```
+
+Or from source:
+
+```bash
+git clone https://github.com/zhuhroscar-tech/blasdrift.git
+cd blasdrift && pip install -e ".[dev]"
 ```
 
 ## Usage
