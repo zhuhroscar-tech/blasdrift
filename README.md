@@ -1,126 +1,51 @@
+[![English](https://img.shields.io/badge/English-555555?style=flat)](README.md) [![简体中文](https://img.shields.io/badge/简体中文-555555?style=flat)](README.zh-CN.md)
+
 # blasdrift
 
-Detect floating-point drift between numpy's BLAS-backed operations
-(`np.dot`, `np.sum`, matrix-vector products) and an independent,
-BLAS-free exact reference -- across BLAS backends (Apple Accelerate,
-OpenBLAS, Intel MKL) and CPU microarchitectures.
+Measure floating-point drift between NumPy operations and an independent, BLAS-free exact reference. Use it to compare numerical behavior across BLAS backends, CPU architectures, and thread counts—not to force bit-identical results.
 
-## The problem
+## What it reports
 
-`numpy.dot`, `numpy.sum`, and friends do **not** guarantee bit-identical
-results across machines. This is IEEE-754-legal (floating-point addition
-is not associative, and fused multiply-add is an allowed optimization)
-but it silently breaks real projects:
+- Adversarial fixtures reconstructed from reported numerical failure patterns.
+- An exact rational reference built with Python's `fractions.Fraction`.
+- Absolute error, ULP distance, and `exact`, `within_tolerance`, or `drift_detected` verdicts.
+- Human-readable or JSON output, plus an optional thread-sensitivity probe.
 
-- **numpy#30136**: `numpy.dot()` returned different results on Linux
-  (OpenBLAS) vs macOS ARM (Accelerate) for the same float64 inputs,
-  breaking QMCPACK's test suite via a downstream `numpy.floor()` call.
-- **numpy#29393**: `numpy.dot` on float32 matrices returned all zeros
-  under OpenBLAS's SME-specific SGEMM kernel on Apple M4, but worked
-  correctly under Accelerate on the same machine.
-- **numpy#20564**: `numpy.dot` produced two distinct outputs depending
-  on which Intel Xeon CPU model ran it, because different CPU
-  microarchitectures dispatch to different vectorized BLAS kernels.
-- **numpy#11655 / numpy#29933**: dot-product precision depends on
-  thread count, because OpenBLAS/MKL parallelize the reduction
-  differently across thread counts, changing the accumulation order.
-- **FPRev (USENIX ATC 2025, arXiv:2411.00442)**: formalizes this whole
-  class as "accumulation order is undocumented and backend-specific,"
-  and builds a black-box probe to recover it.
-
-If your ML pipeline, scientific code, or test suite assumes `np.dot`
-gives the same answer on your Mac laptop and your Linux CI/production
-box, it doesn't -- and the difference is usually silent until a
-`floor()`, an exact-equality assertion, or a downstream branch on a
-tiny numerical difference blows up in one environment but not the
-other.
-
-## What blasdrift does
-
-1. Runs a small set of adversarial fixtures -- each one a fresh
-   reconstruction of a real, filed bug's failure *shape*, not an
-   invented worst case -- through numpy's BLAS-backed `np.dot`/`np.sum`.
-2. Computes the same fixture through an independent, BLAS-free exact
-   reference using Python's arbitrary-precision `fractions.Fraction`
-   (which cannot depend on BLAS backend, thread count, or CPU kernel
-   dispatch, because it never calls into compiled numpy math at all).
-3. Reports the ULP (unit-in-last-place) distance and absolute error
-   between the two, with an explicit verdict: `exact`,
-   `within_tolerance` (ordinary FP rounding), or `drift_detected`
-   (bigger than ordinary rounding -- worth investigating).
-4. Optionally checks whether a fixture's result is sensitive to thread
-   count alone (`--thread-sensitivity`), reproducing the numpy#11655 /
-   numpy#29933 class directly.
+NumPy reductions and dot products can differ with accumulation order and backend implementation. A difference is not, by itself, proof of a BLAS bug; small rounding changes can still affect downstream equality checks or `floor()` calls.
 
 ## Install
 
-Not yet published to PyPI. Install the latest GitHub Release wheel directly
-(checksum-verified, CI-built):
-
-```bash
-pip install https://github.com/zhuhroscar-tech/blasdrift/releases/latest/download/blasdrift-0.1.0-py3-none-any.whl
-```
-
-Or from source:
+Requires Python 3.9+ and NumPy 1.24+. Install from source:
 
 ```bash
 git clone https://github.com/zhuhroscar-tech/blasdrift.git
-cd blasdrift && pip install -e ".[dev]"
+cd blasdrift
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev]"
 ```
 
-## Usage
+The `dev` extra includes pytest, coverage support, and `threadpoolctl` for backend inspection and thread control. Release wheels are available from [Releases](https://github.com/zhuhroscar-tech/blasdrift/releases); check the accompanying `SHA256SUMS.txt` before installation.
+
+## Quick start
 
 ```bash
-# Run all fixtures, human-readable output
 blasdrift
-
-# Machine-readable JSON (for CI / scripting)
 blasdrift --json
-
-# Run a single fixture
-blasdrift --fixture qmcpack_near_zero_dot
-
-# List available fixtures and their real-bug sources
 blasdrift --list-fixtures
-
-# Check if a result is sensitive to thread count alone
+blasdrift --fixture qmcpack_near_zero_dot
 blasdrift --thread-sensitivity qmcpack_near_zero_dot
-
-# CI-friendly: exit 1 if any fixture drifts beyond tolerance
 blasdrift --check-drift
 ```
 
-## What this tool is NOT
+`--check-drift` exits `1` if a selected probe reports `drift_detected`, otherwise `0`. Without that flag, ordinary probe results do not cause a failure exit. The separate thread-sensitivity mode reports its status rather than acting as a failure gate; inspect its output when scripting it.
 
-- **Not a claim that BLAS is buggy.** Every discrepancy blasdrift finds
-  is IEEE-754-legal floating-point behavior. The tool's job is to make
-  an *undocumented, silent* difference *visible and quantified* before
-  it surfaces as a confusing test failure on a different machine.
-- **Not a fix.** blasdrift does not patch numpy, force a specific BLAS
-  backend, or change accumulation order. If you need bit-reproducible
-  results, pin your BLAS backend and thread count explicitly (the
-  `--thread-sensitivity` check tells you whether thread count alone
-  already matters for your case) -- blasdrift only tells you where and
-  by how much drift exists.
-- **Not exhaustive.** Four fixtures cover four distinct, real, filed
-  bug classes. They are not a general floating-point fuzzer. Real
-  numerical code in your own project may drift in ways these fixtures
-  don't probe.
+## Scope and development
 
-## Verification
+The fixture set is small, not an exhaustive floating-point fuzzer. Results characterize these inputs on the current environment; they do not guarantee reproducibility for your application. Keep application-specific numerical tests, and explicitly control the BLAS backend and thread count where reproducibility matters. blasdrift does not patch NumPy or change its algorithms.
 
-- `pytest --cov` on this repo: unit tests for the exact reference
-  (order-independence, exact rational arithmetic), fixture metadata and
-  reproducibility, ULP-distance edge cases (adjacent floats, sign
-  boundary, NaN/inf), and the CLI (JSON output, `--no-color`,
-  `--check-drift` exit codes).
-- CI runs on both `ubuntu-latest` and `macos-latest` GitHub Actions
-  runners (matching this project's actual cross-platform BLAS claim --
-  Accelerate is only linked on the macOS runner, OpenBLAS on the Linux
-  runner) across Python 3.9 and 3.12.
-- Released wheels/sdists are checksummed (`SHA256SUMS.txt`) and smoke
-  tested from a clean venv as part of CI.
+Run `python -m pytest --cov` after installing the development extra. See [fixtures](src/blasdrift/fixtures.py) for source references and [CI](.github/workflows/ci.yml) for the Linux/macOS test and artifact-build workflow.
 
 ## License
 
-MIT
+[MIT](LICENSE).
