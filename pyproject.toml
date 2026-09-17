@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "blasdrift"
-version = "0.1.0"
+version = "0.1.1"
 description = "Detect floating-point drift between numpy's BLAS-backed operations (Accelerate/OpenBLAS/MKL) and an independent, BLAS-free exact reference"
 readme = "README.md"
 license = { text = "MIT" }
