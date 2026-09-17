@@ -132,10 +132,24 @@ def get_backend_info() -> dict:
 
         pools = threadpoolctl.threadpool_info()
         blas_pools = [p for p in pools if p.get("user_api") == "blas"]
-        info["blas_backends"] = [
-            {"internal_api": p.get("internal_api"), "version": p.get("version"), "num_threads": p.get("num_threads")}
-            for p in blas_pools
-        ]
+        if blas_pools:
+            info["blas_backends"] = [
+                {"internal_api": p.get("internal_api"), "version": p.get("version"), "num_threads": p.get("num_threads")}
+                for p in blas_pools
+            ]
+        else:
+            # threadpoolctl ran successfully but reported zero BLAS pools.
+            # This is the normal, expected result on Apple's Accelerate
+            # framework (numpy's default BLAS on macOS since numpy>=1.26):
+            # threadpoolctl only instruments OpenBLAS/MKL/BLIS internals,
+            # not Accelerate's opaque vecLib. An empty list here does NOT
+            # mean "no BLAS backend" -- numpy always has one -- so it must
+            # never be returned bare; that reads as a confirmed absence
+            # rather than "this backend isn't introspectable this way".
+            info["blas_backends"] = (
+                "not detected by threadpoolctl (likely Apple Accelerate/vecLib, "
+                "which threadpoolctl does not instrument)"
+            )
     except ImportError:
         info["blas_backends"] = "unknown (install threadpoolctl for details)"
     return info

@@ -103,3 +103,56 @@ def test_get_backend_info_has_required_keys():
     assert "numpy_version" in info
     assert "python_version" in info
     assert "platform" in info
+
+
+def test_get_backend_info_empty_pool_list_is_not_silently_empty(monkeypatch):
+    """Regression for the Accelerate false-blank bug: threadpoolctl is
+    installed and runs successfully but reports zero BLAS pools for
+    Apple's Accelerate framework (it only instruments OpenBLAS/MKL/BLIS).
+    Before the fix, get_backend_info() returned `blas_backends: []` in
+    this case -- indistinguishable from "we checked and there genuinely
+    is no BLAS backend", which is never true (numpy always has one).
+    The value must be a non-empty, explicit marker instead of a bare [].
+    """
+    import blasdrift.core as core_mod
+
+    class _FakeThreadpoolctl:
+        @staticmethod
+        def threadpool_info():
+            return []  # simulates Accelerate: no BLAS pool reported
+
+    monkeypatch.setitem(__import__("sys").modules, "threadpoolctl", _FakeThreadpoolctl())
+    info = core_mod.get_backend_info()
+    backends = info["blas_backends"]
+    # Must not be a bare empty list -- that reads as "confirmed no backend".
+    assert backends != []
+    assert isinstance(backends, str)
+    assert "accelerate" in backends.lower() or "not detected" in backends.lower()
+
+
+def test_cli_backend_info_prints_a_blas_backend_row_even_when_pools_are_empty(capsys, monkeypatch):
+    """Regression: _print_backend_info silently omitted the entire 'blas
+    backend' row when get_backend_info()['blas_backends'] was an empty
+    list (the real Accelerate case on this very host), instead of telling
+    the user detection returned nothing. A user comparing BLAS backends
+    -- this tool's whole purpose -- must never see blas backend info
+    vanish with no explanation.
+    """
+    import blasdrift.cli as cli_mod
+    from blasdrift.style import resolve_style
+
+    monkeypatch.setattr(
+        cli_mod,
+        "get_backend_info",
+        lambda: {
+            "numpy_version": "2.4.3",
+            "python_version": "3.11.16",
+            "platform": "darwin",
+            "machine": "arm64",
+            "blas_backends": [],
+        },
+    )
+    style = resolve_style(no_color_flag=True)
+    cli_mod._print_backend_info(style)
+    out = capsys.readouterr().out
+    assert "blas backend" in out

@@ -51,9 +51,14 @@ def _print_backend_info(style) -> None:
         ("machine", info["machine"]),
     ]
     backends = info.get("blas_backends")
-    if isinstance(backends, list):
+    if isinstance(backends, list) and backends:
         for b in backends:
             rows.append(("blas backend", f"{b['internal_api']} {b['version']} (threads={b['num_threads']})"))
+    elif isinstance(backends, list):
+        # Empty list: threadpoolctl ran but found no BLAS pool (e.g. Apple
+        # Accelerate isn't instrumented by it). Never let this collapse to
+        # zero rows -- that reads as "no backend info was even attempted".
+        rows.append(("blas backend", "not detected by threadpoolctl (see --json for detail)"))
     else:
         rows.append(("blas backend", str(backends)))
     print_fields(rows)
